@@ -1,0 +1,102 @@
+%% Particle Swarm Optimisation for Optimal Reactive Power Compensation
+
+function [gBest_score, gBest_pos, Convergence_curve, Q_C, Q_proportion_plot, ...
+          schedule_info_Cap, C_bank_status_info, ...
+          schedule_info_Rea, L_bank_status_info] = PSO_for_ORPC(Particle_no, Max_iter, lb, ub, dim, ...
+                                                                T_sample, Q_L, C_bank_proportion, Max_switch_times, Mode)
+    
+    
+    schedule_info_Cap = [];
+    C_bank_status_info = [];
+    schedule_info_Rea = [];
+    L_bank_status_info = [];
+
+    % GWEO parameters
+    Vmax = 0.5 * abs(ub - lb);
+    wMax = 0.9;
+    wMin = 0.2;
+    c1 = 2;
+    c2 = 2;
+
+    % Initializations
+    vol = zeros(Particle_no, dim);
+    pBest_Score = zeros(Particle_no);
+    pBest_pos = zeros(Particle_no, dim);
+    gBest_pos = zeros(1, dim);
+    Convergence_curve = zeros(1, Max_iter);
+
+    % Random initialization for agents.
+    Positions = initialization(Particle_no, dim, ub, lb); 
+    
+    pBest_Score = inf;
+    
+    % Initialise gBestScore for a minimization problem
+    gBest_score = inf;
+   
+    iter = 1;% Loop counter
+
+    % Main loop
+    while iter <= Max_iter
+        for i = 1:size(Positions, 1)  
+
+            % Return back the search agents that go beyond the boundaries of the search space
+            Flag4ub = Positions(i, :) > ub;
+            Flag4lb = Positions(i, :) < lb;
+            Positions(i, :) = (Positions(i, :) .* (~(Flag4ub + Flag4lb))) + ub .* Flag4ub + lb .* Flag4lb;
+            Cap = Positions(i, :);
+
+            % Calculate objective function for each search agent
+            if Cap(1) > 0
+                [Q_C_Cap, ~, Q_proportion_plot_Cap, schedule_info_Cap, C_bank_status_info] = C_bank_schedule(T_sample, Q_L, Cap(1), ...
+                    C_bank_proportion, Max_switch_times(1), Mode(1));
+                Q_proportion_plot = Q_proportion_plot_Cap;
+                Q_C = Q_C_Cap;
+            end
+            if Cap(2) < 0
+                [Q_C_Rea, ~, Q_proportion_plot_Rea, schedule_info_Rea, L_bank_status_info] = L_bank_schedule(T_sample, Q_L, Cap(2), ...
+                    L_bank_proportion, Max_switch_times(2), Mode(2));
+                Q_proportion_plot = [Q_proportion_plot, Q_proportion_plot_Rea];
+                Q_C = Q_C + Q_C_Rea;
+            end
+            delta_Q = Q_L - Q_C;
+            fitness = sum(delta_Q) * T_sample;
+
+            % Update Alpha, Beta, and Delta
+            if pBest_Score(i) > fitness
+                pBest_Score(i) = fitness;
+                pBest_pos(i, :) = Positions(i,:);
+            end
+            if gBest_score > fitness
+                gBest_score = fitness;
+                gBest_pos = Positions(i,:);
+            end
+        end
+
+        % Update the W of PSO
+        w = wMax - iter * ((wMax - wMin) / Max_iter);
+        % Update the Velocity and Position of particles
+        for i = 1:size(Positions, 1)
+            for j = 1:size(Positions, 2)
+                vol(i, j) = w * vol(i, j) + c1 * rand() * (pBest_pos(i, j) - Positions(i, j)) + ...
+                            c2 * rand() * (gBest_pos(j) - Positions(i, j));
+
+                if vol(i, j) > Vmax(j)
+                    vol(i, j) = Vmax(j);
+                end
+                if vol(i, j) < -Vmax(j)
+                    vol(i, j) = -Vmax(j);
+                end
+            end
+        end
+        Positions = Positions + vol;
+        Convergence_curve(iter) = gBest_score;
+        
+        % Display Results
+        fprintf('Iteration %d:\n', iter);
+        fprintf('The average reactive power energy in the best schedule is %.4f Mvarh.\n', gBest_score);
+        fprintf(['The total capacities of the allocated capacitor and reactor banks are %.2f Mvar and ', ...
+                 '%.2f Mvar, respectively.\n'], abs(gBest_pos(1)), abs(gBest_pos(2)));
+
+        iter = iter + 1;
+    end
+end
